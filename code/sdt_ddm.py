@@ -168,6 +168,7 @@ def apply_hierarchical_sdt_model(data):
     
     This function implements a Bayesian hierarchical model for SDT analysis,
     allowing for both group-level and individual-level parameter estimation.
+    It includes stimulus type and difficulty as predictors.
     
     Args:
         data: DataFrame containing SDT summary statistics
@@ -178,38 +179,61 @@ def apply_hierarchical_sdt_model(data):
     # Get unique participants and conditions
     P = len(data['pnum'].unique())
     C = len(data['condition'].unique())
+
+    # Define predictors (Stimulus Type and Difficulty)
+    stimulus_type = data['condition'] % 2  # 0: Simple, 1: Complex
+    difficulty = data['condition'] // 2  # 0: Easy, 1: Hard
     
     # Define the hierarchical model
     with pm.Model() as sdt_model:
         # Group-level parameters
-        mean_d_prime = pm.Normal('mean_d_prime', mu=0.0, sigma=1.0, shape=C)
+        # Priors for the effects of stimulus type and difficulty on d'
+        mean_d_prime_intercept = pm.Normal('mean_d_prime_intercept', mu=0.0, sigma=1.0)
+        effect_stimulus_type_dprime = pm.Normal('effect_stimulus_type_dprime', mu=0.0, sigma=0.5)
+        effect_difficulty_dprime = pm.Normal('effect_difficulty_dprime', mu=0.0, sigma=0.5)
         stdev_d_prime = pm.HalfNormal('stdev_d_prime', sigma=1.0)
         
-        mean_criterion = pm.Normal('mean_criterion', mu=0.0, sigma=1.0, shape=C)
+        # Priors for the effects of stimulus type and difficulty on criterion
+        mean_criterion_intercept = pm.Normal('mean_criterion_intercept', mu=0.0, sigma=1.0)
+        effect_stimulus_type_criterion = pm.Normal('effect_stimulus_type_criterion', mu=0.0, sigma=0.5)
+        effect_difficulty_criterion = pm.Normal('effect_difficulty_criterion', mu=0.0, sigma=0.5)
         stdev_criterion = pm.HalfNormal('stdev_criterion', sigma=1.0)
         
         # Individual-level parameters
-        d_prime = pm.Normal('d_prime', mu=mean_d_prime, sigma=stdev_d_prime, shape=(P, C))
-        criterion = pm.Normal('criterion', mu=mean_criterion, sigma=stdev_criterion, shape=(P, C))
+        # Modeling d' with effects of stimulus type and difficulty
+        d_prime = pm.Normal('d_prime', 
+                            mu=mean_d_prime_intercept + 
+                               effect_stimulus_type_dprime * stimulus_type + 
+                               effect_difficulty_dprime * difficulty, 
+                            sigma=stdev_d_prime, 
+                            shape=(P, C))
+        
+        # Modeling criterion with effects of stimulus type and difficulty
+        criterion = pm.Normal('criterion', 
+                             mu=mean_criterion_intercept + 
+                                effect_stimulus_type_criterion * stimulus_type +
+                                effect_difficulty_criterion * difficulty, 
+                             sigma=stdev_criterion, 
+                             shape=(P, C))
         
         # Calculate hit and false alarm rates using SDT
         hit_rate = pm.math.invlogit(d_prime - criterion)
         false_alarm_rate = pm.math.invlogit(-criterion)
                 
         # Likelihood for signal trials
-        # Note: pnum is 1-indexed in the data, but needs to be 0-indexed for the model, so we change the indexing here.  The results table will show participant numbers starting from 0, so we need to interpret the results accordingly.
         pm.Binomial('hit_obs', 
-                   n=data['nSignal'], 
-                   p=hit_rate[data['pnum']-1, data['condition']], 
-                   observed=data['hits'])
+                       n=data['nSignal'], 
+                       p=hit_rate[data['pnum']-1, data['condition']], 
+                       observed=data['hits'])
         
         # Likelihood for noise trials
         pm.Binomial('false_alarm_obs', 
-                   n=data['nNoise'], 
-                   p=false_alarm_rate[data['pnum']-1, data['condition']], 
-                   observed=data['false_alarms'])
+                       n=data['nNoise'], 
+                       p=false_alarm_rate[data['pnum']-1, data['condition']], 
+                       observed=data['false_alarms'])
     
     return sdt_model
+
 
 def draw_delta_plots(data, pnum):
     """Draw delta plots comparing RT distributions between condition pairs.
@@ -312,6 +336,7 @@ def draw_delta_plots(data, pnum):
     # Save the figure
     plt.savefig(OUTPUT_DIR / f'delta_plots_{pnum}.png')
 
+
 # Main execution
 if __name__ == "__main__":
     data_file_path = Path(__file__).parent.parent / 'data' / 'data.csv'
@@ -371,3 +396,52 @@ if __name__ == "__main__":
             print(f"Delta plots for Participant {pnum} saved to {OUTPUT_DIR / f'delta_plots_{pnum}.png'}")
     else:
         print("Delta plot data is empty. Skipping delta plot generation.")
+
+
+# Main execution
+if __name__ == "__main__":
+    data_path = Path(__file__).parent.parent / 'data' / 'data.csv' 
+    sdt_data = read_data(data_path, prepare_for='sdt', display=True)
+
+    sdt_model = apply_hierarchical_sdt_model(sdt_data)
+
+    print("\nSampling from the SDT model posterior...")
+    with sdt_model:
+        trace = pm.sample(draws=2000, tune=2000, chains=4, cores=4, random_seed=42)
+    print("Sampling complete.")
+
+    # Convergence
+    print("\n--- Model Convergence Summary ---")
+    convergence_summary = az.summary(trace, var_names=[
+        'mean_d_prime_intercept', 'effect_stimulus_type_dprime', 'effect_difficulty_dprime',
+        'stdev_d_prime', 'mean_criterion_intercept', 'effect_stimulus_type_criterion',
+        'effect_difficulty_criterion', 'stdev_criterion'
+    ])
+    print(convergence_summary)
+
+    # Save the convergence summary to a CSV file for later review
+    OUTPUT_DIR = Path(__file__).parent.parent.parent / 'output'
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    convergence_summary.to_csv(OUTPUT_DIR / 'sdt_model_convergence_summary.csv')
+    print(f"\nConvergence summary saved to: {OUTPUT_DIR / 'sdt_model_convergence_summary.csv'}")
+
+    # Posterior Distributions 
+    print("\n--- Displaying Posterior Distributions ---")
+    az.plot_posterior(trace, var_names=[
+        'mean_d_prime_intercept', 'effect_stimulus_type_dprime', 'effect_difficulty_dprime',
+        'mean_criterion_intercept', 'effect_stimulus_type_criterion', 'effect_difficulty_criterion'
+    ])
+    plt.suptitle("Posterior Distributions of SDT Model Parameters", y=1.02)
+    plt.tight_layout()
+    plt.savefig(OUTPUT_DIR / 'sdt_posterior_distributions.png')
+    print(f"Posterior distributions plot saved to: {OUTPUT_DIR / 'sdt_posterior_distributions.png'}")
+    plt.show() # Display the plot if running interactively
+
+    # Delta Plots
+    delta_plot_data = read_data(data_path, prepare_for='delta plots', display=True)
+    print("\n--- Drawing Delta Plots ---")
+    participant_to_plot = sdt_data['pnum'].unique()[0] # Plot for the first participant
+    draw_delta_plots(delta_plot_data, participant_to_plot)
+    print(f"Delta plots for participant {participant_to_plot} saved to: {OUTPUT_DIR / f'delta_plots_{participant_to_plot}.png'}")
+
+    print("\nAnalysis complete. Check 'output' folder!")
