@@ -314,6 +314,60 @@ def draw_delta_plots(data, pnum):
 
 # Main execution
 if __name__ == "__main__":
-    file_to_print = Path(__file__).parent / 'README.md'
-    with open(file_to_print, 'r') as file:
-        print(file.read())
+    data_file_path = Path(__file__).parent.parent / 'data' / 'data.csv'
+
+    OUTPUT_DIR = Path(__file__).parent.parent / 'output'
+    os.makedirs(OUTPUT_DIR, exist_ok=True) # Ensure output directory exists
+
+    # Check if the data file exists
+    if not data_file_path.exists():
+        print(f"Error: Data file not found at {data_file_path}")
+        print("Please ensure 'data.csv' is in a 'data' folder at the root of your project,")
+        print("e.g., if your script is in 'project/code/sdt_ddm.py', data.csv should be in 'project/data/data.csv'.")
+        exit() # Exit the script if the data file is not found
+    else:
+        print(f"Using data file: {data_file_path}")
+    
+    # Execute SDT Analysis
+    print("\n--- Running SDT Analysis ---")
+    sdt_data = read_data(data_file_path, prepare_for='sdt', display=True)
+    
+    if not sdt_data.empty:
+        print("\nApplying Hierarchical SDT Model (this may take a moment)...")
+        
+        sdt_model = apply_hierarchical_sdt_model(sdt_data)
+
+        # Sample from the posterior
+        with sdt_model:
+            # Adjust the number of draws and chains as needed for convergence
+            trace = pm.sample(draws=2000, tune=1000, chains=2, random_seed=42, return_inferencedata=True)
+        
+        # Display summary of the posterior (d_prime and criterion parameters)
+        print("\nSDT Model Summary:")
+        print(az.summary(trace, var_names=['mean_d_prime', 'stdev_d_prime', 'mean_criterion', 'stdev_criterion']))
+        
+        # Plot posterior distributions
+        az.plot_trace(trace, var_names=['mean_d_prime', 'mean_criterion'])
+        plt.suptitle("Posterior Distributions of Group-Level SDT Parameters")
+        
+        # Save plots to output directory (already defined above)
+        plt.savefig(OUTPUT_DIR / 'sdt_posterior_plots.png')
+        plt.close() # Close the plot to prevent it from displaying in the console
+        print(f"SDT posterior plots saved to {OUTPUT_DIR / 'sdt_posterior_plots.png'}")
+
+    else:
+        print("SDT data is empty. Skipping model application.")
+
+    # Execute Delta Plot Analysis
+    print("\n--- Running Delta Plot Analysis ---")
+    dp_data = read_data(data_file_path, prepare_for='delta plots', display=True)
+
+    if not dp_data.empty:
+        # Draw delta plots for each participant
+        for pnum in dp_data['pnum'].unique():
+            print(f"\nDrawing delta plots for Participant {pnum}...")
+            draw_delta_plots(dp_data, pnum)
+            plt.close() # Close the plot after saving
+            print(f"Delta plots for Participant {pnum} saved to {OUTPUT_DIR / f'delta_plots_{pnum}.png'}")
+    else:
+        print("Delta plot data is empty. Skipping delta plot generation.")
