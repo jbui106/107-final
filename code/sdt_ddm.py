@@ -177,60 +177,71 @@ def apply_hierarchical_sdt_model(data):
         PyMC model object
     """
     # Get unique participants and conditions
-    P = len(data['pnum'].unique())
-    C = len(data['condition'].unique())
-
-    # Define predictors (Stimulus Type and Difficulty)
-    stimulus_type = data['condition'] % 2  # 0: Simple, 1: Complex
-    difficulty = data['condition'] // 2  # 0: Easy, 1: Hard
+    unique_pnums = data['pnum'].unique()
+    P = len(unique_pnums)
+    unique_conditions = data['condition'].unique()
+    C = len(unique_conditions)
     
-    # Define the hierarchical model
+    stimulus_type_conditions = np.array([c % 2 for c in unique_conditions]) 
+    difficulty_conditions = np.array([c // 2 for c in unique_conditions])  
+
     with pm.Model() as sdt_model:
-        # Group-level parameters
-        # Priors for the effects of stimulus type and difficulty on d'
+        # Group-level parameters for effects of stimulus type and difficulty
+        
+        # d_prime effects
         mean_d_prime_intercept = pm.Normal('mean_d_prime_intercept', mu=0.0, sigma=1.0)
         effect_stimulus_type_dprime = pm.Normal('effect_stimulus_type_dprime', mu=0.0, sigma=0.5)
         effect_difficulty_dprime = pm.Normal('effect_difficulty_dprime', mu=0.0, sigma=0.5)
-        stdev_d_prime = pm.HalfNormal('stdev_d_prime', sigma=1.0)
+        stdev_d_prime_overall = pm.HalfNormal('stdev_d_prime_overall', sigma=1.0) # Overall SD for d_prime
         
-        # Priors for the effects of stimulus type and difficulty on criterion
+        # criterion effects
         mean_criterion_intercept = pm.Normal('mean_criterion_intercept', mu=0.0, sigma=1.0)
         effect_stimulus_type_criterion = pm.Normal('effect_stimulus_type_criterion', mu=0.0, sigma=0.5)
         effect_difficulty_criterion = pm.Normal('effect_difficulty_criterion', mu=0.0, sigma=0.5)
-        stdev_criterion = pm.HalfNormal('stdev_criterion', sigma=1.0)
+        stdev_criterion_overall = pm.HalfNormal('stdev_criterion_overall', sigma=1.0) # Overall SD for criterion
+
+        # Define the mean d_prime and criterion for *each condition (C)*
+        mean_d_prime_per_condition = pm.Deterministic(
+            'mean_d_prime_per_condition',
+            mean_d_prime_intercept +
+            effect_stimulus_type_dprime * stimulus_type_conditions +
+            effect_difficulty_dprime * difficulty_conditions
+        )
+        
+        mean_criterion_per_condition = pm.Deterministic(
+            'mean_criterion_per_condition',
+            mean_criterion_intercept +
+            effect_stimulus_type_criterion * stimulus_type_conditions +
+            effect_difficulty_criterion * difficulty_conditions
+        )
         
         # Individual-level parameters
-        # Modeling d' with effects of stimulus type and difficulty
-        d_prime = pm.Normal('d_prime', 
-                            mu=mean_d_prime_intercept + 
-                               effect_stimulus_type_dprime * stimulus_type + 
-                               effect_difficulty_dprime * difficulty, 
-                            sigma=stdev_d_prime, 
-                            shape=(P, C))
-        
-        # Modeling criterion with effects of stimulus type and difficulty
-        criterion = pm.Normal('criterion', 
-                             mu=mean_criterion_intercept + 
-                                effect_stimulus_type_criterion * stimulus_type +
-                                effect_difficulty_criterion * difficulty, 
-                             sigma=stdev_criterion, 
+        d_prime = pm.Normal('d_prime',
+                            mu=mean_d_prime_per_condition[data['condition'].values], # Index by condition
+                            sigma=stdev_d_prime_overall,
+                            shape=(P, C)) # This shape is still correct for the array of individual values
+
+        # criterion for each participant and condition (P, C)
+        criterion = pm.Normal('criterion',
+                             mu=mean_criterion_per_condition[data['condition'].values], # Index by condition
+                             sigma=stdev_criterion_overall,
                              shape=(P, C))
         
         # Calculate hit and false alarm rates using SDT
-        hit_rate = pm.math.invlogit(d_prime - criterion)
-        false_alarm_rate = pm.math.invlogit(-criterion)
+        hit_rate = pm.math.invlogit(d_prime[data['pnum'].values-1, data['condition'].values] - criterion[data['pnum'].values-1, data['condition'].values])
+        false_alarm_rate = pm.math.invlogit(-criterion[data['pnum'].values-1, data['condition'].values])
                 
         # Likelihood for signal trials
         pm.Binomial('hit_obs', 
-                       n=data['nSignal'], 
-                       p=hit_rate[data['pnum']-1, data['condition']], 
-                       observed=data['hits'])
+                   n=data['nSignal'].values, # Use .values for observed data
+                   p=hit_rate, 
+                   observed=data['hits'].values)
         
         # Likelihood for noise trials
         pm.Binomial('false_alarm_obs', 
-                       n=data['nNoise'], 
-                       p=false_alarm_rate[data['pnum']-1, data['condition']], 
-                       observed=data['false_alarms'])
+                   n=data['nNoise'].values, # Use .values for observed data
+                   p=false_alarm_rate, 
+                   observed=data['false_alarms'].values)
     
     return sdt_model
 
