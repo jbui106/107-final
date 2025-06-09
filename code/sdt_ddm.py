@@ -220,36 +220,30 @@ def apply_hierarchical_sdt_model(data):
 
         # Define the mean d_prime and criterion for *each condition (C)*
         # This will be a (C,) shaped tensor
-        mean_d_prime_per_condition_latent = (
+        mean_d_prime_per_condition = pm.Deterministic(
+            'mean_d_prime_per_condition', 
             mean_d_prime_intercept +
             effect_stimulus_type_dprime * stimulus_type_conditions +
-            effect_difficulty_dprime * difficulty_conditions
-        )
-        mean_d_prime_per_condition = pm.Deterministic(
-            'mean_d_prime_per_condition', mean_d_prime_per_condition_latent, dims=('condition_idx',)
+            effect_difficulty_dprime * difficulty_conditions,
+            dims=('condition_idx',)
         )
         
-        mean_criterion_per_condition_latent = (
+        mean_criterion_per_condition = pm.Deterministic(
+            'mean_criterion_per_condition', 
             mean_criterion_intercept +
             effect_stimulus_type_criterion * stimulus_type_conditions +
-            effect_difficulty_criterion * difficulty_conditions
-        )
-        mean_criterion_per_condition = pm.Deterministic(
-            'mean_criterion_per_condition', mean_criterion_per_condition_latent, dims=('condition_idx',)
+            effect_difficulty_criterion * difficulty_conditions,
+            dims=('condition_idx',)
         )
         
-        # Expand condition-specific means to a (1, C) shape for broadcasting
-        mean_d_prime_per_condition_expanded = pm.math.atleast_2d(mean_d_prime_per_condition_latent)
-        mean_criterion_per_condition_expanded = pm.math.atleast_2d(mean_criterion_per_condition_latent)
-
         # Individual-level parameters (P, C)
         d_prime = pm.Normal('d_prime',
-                            mu=mean_d_prime_per_condition_expanded,
+                            mu=mean_d_prime_per_condition, # Use the 1D PyTensor variable directly
                             sigma=stdev_d_prime_overall,
                             dims=('pnum_idx', 'condition_idx'))
 
         criterion = pm.Normal('criterion',
-                             mu=mean_criterion_per_condition_expanded,
+                             mu=mean_criterion_per_condition, # Use the 1D PyTensor variable directly
                              sigma=stdev_criterion_overall,
                              dims=('pnum_idx', 'condition_idx'))
         
