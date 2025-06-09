@@ -1,0 +1,9 @@
+,mean,sd,hdi_3%,hdi_97%,mcse_mean,mcse_sd,ess_bulk,ess_tail,r_hat
+mean_d_prime_intercept,4.118,0.362,3.424,4.771,0.004,0.004,9622.0,6811.0,1.0
+effect_stimulus_type_dprime,0.21,0.316,-0.384,0.807,0.003,0.004,14333.0,6264.0,1.0
+effect_difficulty_dprime,-1.755,0.427,-2.552,-0.956,0.004,0.004,10314.0,6856.0,1.0
+stdev_d_prime_overall,1.395,0.216,1.029,1.817,0.002,0.002,8999.0,6326.0,1.0
+mean_criterion_intercept,2.49,0.152,2.196,2.769,0.001,0.002,11832.0,6266.0,1.0
+effect_stimulus_type_criterion,0.044,0.167,-0.268,0.366,0.001,0.002,13528.0,6495.0,1.0
+effect_difficulty_criterion,-1.516,0.176,-1.862,-1.189,0.002,0.002,13462.0,5813.0,1.0
+stdev_criterion_overall,0.559,0.074,0.428,0.699,0.001,0.001,12487.0,6645.0,1.0
