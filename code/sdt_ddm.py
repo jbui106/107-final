@@ -83,6 +83,7 @@ def read_data(file_path, prepare_for='sdt', display=False):
                 signal_trials = c_data[c_data['signal'] == 0]
                 noise_trials = c_data[c_data['signal'] == 1]
                 
+                # Ensure we have data for both signal and noise trials for a valid SDT calculation
                 if not signal_trials.empty and not noise_trials.empty:
                     sdt_data.append({
                         'pnum': pnum,
@@ -129,36 +130,42 @@ def read_data(file_path, prepare_for='sdt', display=False):
                 
                 # Calculate percentiles for overall RTs
                 overall_rt = c_data['rt']
-                dp_data = pd.concat([dp_data, pd.DataFrame({
-                    'pnum': [pnum],
-                    'condition': [condition],
-                    'mode': ['overall'],
-                    **{f'p{p}': [np.percentile(overall_rt, p)] for p in PERCENTILES}
-                })])
+                # Only add if there's enough data to calculate percentiles
+                if not overall_rt.empty:
+                    dp_data = pd.concat([dp_data, pd.DataFrame({
+                        'pnum': [pnum],
+                        'condition': [condition],
+                        'mode': ['overall'],
+                        **{f'p{p}': [np.percentile(overall_rt, p)] for p in PERCENTILES}
+                    })], ignore_index=True) # Use ignore_index=True with pd.concat
                 
                 # Calculate percentiles for accurate responses
                 accurate_rt = c_data[c_data['accuracy'] == 1]['rt']
-                dp_data = pd.concat([dp_data, pd.DataFrame({
-                    'pnum': [pnum],
-                    'condition': [condition],
-                    'mode': ['accurate'],
-                    **{f'p{p}': [np.percentile(accurate_rt, p)] for p in PERCENTILES}
-                })])
+                if not accurate_rt.empty:
+                    dp_data = pd.concat([dp_data, pd.DataFrame({
+                        'pnum': [pnum],
+                        'condition': [condition],
+                        'mode': ['accurate'],
+                        **{f'p{p}': [np.percentile(accurate_rt, p)] for p in PERCENTILES}
+                    })], ignore_index=True)
                 
                 # Calculate percentiles for error responses
                 error_rt = c_data[c_data['accuracy'] == 0]['rt']
-                dp_data = pd.concat([dp_data, pd.DataFrame({
-                    'pnum': [pnum],
-                    'condition': [condition],
-                    'mode': ['error'],
-                    **{f'p{p}': [np.percentile(error_rt, p)] for p in PERCENTILES}
-                })])
+                if not error_rt.empty:
+                    dp_data = pd.concat([dp_data, pd.DataFrame({
+                        'pnum': [pnum],
+                        'condition': [condition],
+                        'mode': ['error'],
+                        **{f'p{p}': [np.percentile(error_rt, p)] for p in PERCENTILES}
+                    })], ignore_index=True)
                 
         if display:
             print("\nDelta plots data:")
             print(dp_data)
             
-        data = pd.DataFrame(dp_data)
+        data = dp_data # Assign the collected dp_data to 'data'
+        if data.empty:
+            print("\nWARNING: Empty Delta Plot data generated!")
 
     return data
 
@@ -176,70 +183,89 @@ def apply_hierarchical_sdt_model(data):
     Returns:
         PyMC model object
     """
-    # Get unique participants and conditions
     unique_pnums = data['pnum'].unique()
     P = len(unique_pnums)
     unique_conditions = data['condition'].unique()
     C = len(unique_conditions)
     
-    stimulus_type_conditions = np.array([c % 2 for c in unique_conditions]) 
-    difficulty_conditions = np.array([c // 2 for c in unique_conditions])  
+    stimulus_type_conditions = np.array([c % 2 for c in unique_conditions])
+    difficulty_conditions = np.array([c // 2 for c in unique_conditions])
 
-    with pm.Model() as sdt_model:
+    pnum_to_idx = {p: i for i, p in enumerate(unique_pnums)}
+    condition_to_idx = {c: i for i, c in enumerate(unique_conditions)}
+
+    pnum_data_indexed = data['pnum'].map(pnum_to_idx).values
+    condition_data_indexed = data['condition'].map(condition_to_idx).values
+
+    # Define coordinates for cleaner output
+    coords = {
+        'pnum_idx': unique_pnums, # Use actual participant IDs for better readability
+        'condition_idx': [CONDITION_NAMES[c_val] for c_val in unique_conditions] # Use descriptive names
+    }
+
+    with pm.Model(coords=coords) as sdt_model:
         # Group-level parameters for effects of stimulus type and difficulty
         
         # d_prime effects
         mean_d_prime_intercept = pm.Normal('mean_d_prime_intercept', mu=0.0, sigma=1.0)
         effect_stimulus_type_dprime = pm.Normal('effect_stimulus_type_dprime', mu=0.0, sigma=0.5)
         effect_difficulty_dprime = pm.Normal('effect_difficulty_dprime', mu=0.0, sigma=0.5)
-        stdev_d_prime_overall = pm.HalfNormal('stdev_d_prime_overall', sigma=1.0) # Overall SD for d_prime
+        stdev_d_prime_overall = pm.HalfNormal('stdev_d_prime_overall', sigma=1.0)
         
         # criterion effects
         mean_criterion_intercept = pm.Normal('mean_criterion_intercept', mu=0.0, sigma=1.0)
         effect_stimulus_type_criterion = pm.Normal('effect_stimulus_type_criterion', mu=0.0, sigma=0.5)
         effect_difficulty_criterion = pm.Normal('effect_difficulty_criterion', mu=0.0, sigma=0.5)
-        stdev_criterion_overall = pm.HalfNormal('stdev_criterion_overall', sigma=1.0) # Overall SD for criterion
+        stdev_criterion_overall = pm.HalfNormal('stdev_criterion_overall', sigma=1.0)
 
         # Define the mean d_prime and criterion for *each condition (C)*
-        mean_d_prime_per_condition = pm.Deterministic(
-            'mean_d_prime_per_condition',
+        # This will be a (C,) shaped tensor
+        mean_d_prime_per_condition_latent = (
             mean_d_prime_intercept +
             effect_stimulus_type_dprime * stimulus_type_conditions +
             effect_difficulty_dprime * difficulty_conditions
         )
+        mean_d_prime_per_condition = pm.Deterministic(
+            'mean_d_prime_per_condition', mean_d_prime_per_condition_latent, dims=('condition_idx',)
+        )
         
-        mean_criterion_per_condition = pm.Deterministic(
-            'mean_criterion_per_condition',
+        mean_criterion_per_condition_latent = (
             mean_criterion_intercept +
             effect_stimulus_type_criterion * stimulus_type_conditions +
             effect_difficulty_criterion * difficulty_conditions
         )
+        mean_criterion_per_condition = pm.Deterministic(
+            'mean_criterion_per_condition', mean_criterion_per_condition_latent, dims=('condition_idx',)
+        )
         
-        # Individual-level parameters
-        d_prime = pm.Normal('d_prime',
-                            mu=mean_d_prime_per_condition[data['condition'].values], # Index by condition
-                            sigma=stdev_d_prime_overall,
-                            shape=(P, C)) # This shape is still correct for the array of individual values
+        # Expand condition-specific means to a (1, C) shape for broadcasting
+        mean_d_prime_per_condition_expanded = pm.math.atleast_2d(mean_d_prime_per_condition_latent)
+        mean_criterion_per_condition_expanded = pm.math.atleast_2d(mean_criterion_per_condition_latent)
 
-        # criterion for each participant and condition (P, C)
+        # Individual-level parameters (P, C)
+        d_prime = pm.Normal('d_prime',
+                            mu=mean_d_prime_per_condition_expanded,
+                            sigma=stdev_d_prime_overall,
+                            dims=('pnum_idx', 'condition_idx'))
+
         criterion = pm.Normal('criterion',
-                             mu=mean_criterion_per_condition[data['condition'].values], # Index by condition
+                             mu=mean_criterion_per_condition_expanded,
                              sigma=stdev_criterion_overall,
-                             shape=(P, C))
+                             dims=('pnum_idx', 'condition_idx'))
         
-        # Calculate hit and false alarm rates using SDT
-        hit_rate = pm.math.invlogit(d_prime[data['pnum'].values-1, data['condition'].values] - criterion[data['pnum'].values-1, data['condition'].values])
-        false_alarm_rate = pm.math.invlogit(-criterion[data['pnum'].values-1, data['condition'].values])
+        # Likelihood for signal trials
+        hit_rate = pm.math.invlogit(d_prime[pnum_data_indexed, condition_data_indexed] - criterion[pnum_data_indexed, condition_data_indexed])
+        false_alarm_rate = pm.math.invlogit(-criterion[pnum_data_indexed, condition_data_indexed])
                 
         # Likelihood for signal trials
         pm.Binomial('hit_obs', 
-                   n=data['nSignal'].values, # Use .values for observed data
+                   n=data['nSignal'].values, 
                    p=hit_rate, 
                    observed=data['hits'].values)
         
         # Likelihood for noise trials
         pm.Binomial('false_alarm_obs', 
-                   n=data['nNoise'].values, # Use .values for observed data
+                   n=data['nNoise'].values, 
                    p=false_alarm_rate, 
                    observed=data['false_alarms'].values)
     
@@ -268,8 +294,8 @@ def draw_delta_plots(data, pnum):
     fig, axes = plt.subplots(n_conditions, n_conditions, 
                             figsize=(4*n_conditions, 4*n_conditions))
     
-    # Create output directory
-    OUTPUT_DIR = Path(__file__).parent.parent.parent / 'output'
+    # Create output directory relative to where script is run
+    OUTPUT_DIR = Path(__file__).parent.parent / 'output'
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
     # Define marker style for plots
@@ -292,70 +318,75 @@ def draw_delta_plots(data, pnum):
                 
             # Skip diagonal and lower triangle for overall plots
             if i > j:
-                continue
-            if i == j:
-                axes[i,j].axis('off')
-                continue
-            
-            # Create masks for condition and plotting mode
-            cmask1 = data['condition'] == cond1
-            cmask2 = data['condition'] == cond2
-            overall_mask = data['mode'] == 'overall'
-            error_mask = data['mode'] == 'error'
-            accurate_mask = data['mode'] == 'accurate'
-            
-            # Calculate RT differences for overall performance
-            quantiles1 = [data[cmask1 & overall_mask][f'p{p}'] for p in PERCENTILES]
-            quantiles2 = [data[cmask2 & overall_mask][f'p{p}'] for p in PERCENTILES]
-            overall_delta = np.array(quantiles2) - np.array(quantiles1)
-            
-            # Calculate RT differences for error responses
-            error_quantiles1 = [data[cmask1 & error_mask][f'p{p}'] for p in PERCENTILES]
-            error_quantiles2 = [data[cmask2 & error_mask][f'p{p}'] for p in PERCENTILES]
-            error_delta = np.array(error_quantiles2) - np.array(error_quantiles1)
-            
-            # Calculate RT differences for accurate responses
-            accurate_quantiles1 = [data[cmask1 & accurate_mask][f'p{p}'] for p in PERCENTILES]
-            accurate_quantiles2 = [data[cmask2 & accurate_mask][f'p{p}'] for p in PERCENTILES]
-            accurate_delta = np.array(accurate_quantiles2) - np.array(accurate_quantiles1)
-            
-            # Plot overall RT differences
-            axes[i,j].plot(PERCENTILES, overall_delta, color='black', **marker_style)
-            
-            # Plot error and accurate RT differences
-            axes[j,i].plot(PERCENTILES, error_delta, color='red', **marker_style)
-            axes[j,i].plot(PERCENTILES, accurate_delta, color='green', **marker_style)
-            axes[j,i].legend(['Error', 'Accurate'], loc='upper left')
+                # Upper triangle for overall RT differences
+                cmask1 = data['condition'] == cond1
+                cmask2 = data['condition'] == cond2
+                overall_mask = data['mode'] == 'overall'
+                
+                # Check if data exists for the conditions and mode before attempting percentile calculation
+                if not data[cmask1 & overall_mask].empty and not data[cmask2 & overall_mask].empty:
+                    quantiles1 = [data[cmask1 & overall_mask][f'p{p}'].iloc[0] for p in PERCENTILES]
+                    quantiles2 = [data[cmask2 & overall_mask][f'p{p}'].iloc[0] for p in PERCENTILES]
+                    overall_delta = np.array(quantiles2) - np.array(quantiles1)
+                    axes[i,j].plot(PERCENTILES, overall_delta, color='black', **marker_style)
+                else:
+                    axes[i,j].text(50, 0, "No data", ha='center', va='center', fontsize=10, color='gray')
 
-            # Set y-axis limits and add reference line
-            axes[i,j].set_ylim(bottom=-1/3, top=1/2)
-            axes[j,i].set_ylim(bottom=-1/3, top=1/2)
-            axes[i,j].axhline(y=0, color='gray', linestyle='--', alpha=0.5) 
-            axes[j,i].axhline(y=0, color='gray', linestyle='--', alpha=0.5)
-            
-            # Add condition labels
-            axes[i,j].text(50, -0.27, 
-                          f'{CONDITION_NAMES[conditions[j]]} - {CONDITION_NAMES[conditions[i]]}', 
-                          ha='center', va='top', fontsize=12)
-            
-            axes[j,i].text(50, -0.27, 
-                          f'{CONDITION_NAMES[conditions[j]]} - {CONDITION_NAMES[conditions[i]]}', 
-                          ha='center', va='top', fontsize=12)
-            
-            plt.tight_layout()
+                axes[i,j].set_ylim(bottom=-1/3, top=1/2) # Set common y-axis limits
+                axes[i,j].axhline(y=0, color='gray', linestyle='--', alpha=0.5) 
+                axes[i,j].text(50, -0.27, 
+                              f'{CONDITION_NAMES[conditions[j]]} - {CONDITION_NAMES[conditions[i]]}', 
+                              ha='center', va='top', fontsize=12)
+
+            elif i < j:
+                # Lower triangle for error and accurate RT differences
+                cmask1 = data['condition'] == cond1
+                cmask2 = data['condition'] == cond2
+                error_mask = data['mode'] == 'error'
+                accurate_mask = data['mode'] == 'accurate'
+
+                plotted_data = False
+                if not data[cmask1 & error_mask].empty and not data[cmask2 & error_mask].empty:
+                    error_quantiles1 = [data[cmask1 & error_mask][f'p{p}'].iloc[0] for p in PERCENTILES]
+                    error_quantiles2 = [data[cmask2 & error_mask][f'p{p}'].iloc[0] for p in PERCENTILES]
+                    error_delta = np.array(error_quantiles2) - np.array(error_quantiles1)
+                    axes[i,j].plot(PERCENTILES, error_delta, color='red', **marker_style)
+                    plotted_data = True
+                
+                if not data[cmask1 & accurate_mask].empty and not data[cmask2 & accurate_mask].empty:
+                    accurate_quantiles1 = [data[cmask1 & accurate_mask][f'p{p}'].iloc[0] for p in PERCENTILES]
+                    accurate_quantiles2 = [data[cmask2 & accurate_mask][f'p{p}'].iloc[0] for p in PERCENTILES]
+                    accurate_delta = np.array(accurate_quantiles2) - np.array(accurate_quantiles1)
+                    axes[i,j].plot(PERCENTILES, accurate_delta, color='green', **marker_style)
+                    plotted_data = True
+
+                if plotted_data:
+                    axes[i,j].legend(['Error', 'Accurate'], loc='upper left')
+                else:
+                    axes[i,j].text(50, 0, "No data", ha='center', va='center', fontsize=10, color='gray')
+
+
+                axes[i,j].set_ylim(bottom=-1/3, top=1/2) # Set common y-axis limits
+                axes[i,j].axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+                axes[i,j].text(50, -0.27, 
+                              f'{CONDITION_NAMES[conditions[j]]} - {CONDITION_NAMES[conditions[i]]}', 
+                              ha='center', va='top', fontsize=12)
+            else: # Diagonal
+                axes[i,j].axis('off') # Turn off axes for diagonal plots
+
+    plt.tight_layout()
             
     # Save the figure
     plt.savefig(OUTPUT_DIR / f'delta_plots_{pnum}.png')
 
 
-# Main execution
+# Main execution block
 if __name__ == "__main__":
     data_file_path = Path(__file__).parent.parent / 'data' / 'data.csv'
 
     OUTPUT_DIR = Path(__file__).parent.parent / 'output'
     os.makedirs(OUTPUT_DIR, exist_ok=True) # Ensure output directory exists
 
-    # Check if the data file exists
     if not data_file_path.exists():
         print(f"Error: Data file not found at {data_file_path}")
         print("Please ensure 'data.csv' is in a 'data' folder at the root of your project,")
@@ -364,8 +395,8 @@ if __name__ == "__main__":
     else:
         print(f"Using data file: {data_file_path}")
     
-    # Execute SDT Analysis
-    print("\n--- Running SDT Analysis ---")
+    # SDT Analysis 
+    print("\n" + "="*30 + "\n--- Running SDT Analysis ---\n" + "="*30)
     sdt_data = read_data(data_file_path, prepare_for='sdt', display=True)
     
     if not sdt_data.empty:
@@ -373,86 +404,70 @@ if __name__ == "__main__":
         
         sdt_model = apply_hierarchical_sdt_model(sdt_data)
 
-        # Sample from the posterior
+        # Sample from the posterior distribution
+        print("\nSampling from the SDT model posterior...")
         with sdt_model:
-            # Adjust the number of draws and chains as needed for convergence
-            trace = pm.sample(draws=2000, tune=1000, chains=2, random_seed=42, return_inferencedata=True)
-        
-        # Display summary of the posterior (d_prime and criterion parameters)
-        print("\nSDT Model Summary:")
-        print(az.summary(trace, var_names=['mean_d_prime', 'stdev_d_prime', 'mean_criterion', 'stdev_criterion']))
-        
-        # Plot posterior distributions
-        az.plot_trace(trace, var_names=['mean_d_prime', 'mean_criterion'])
-        plt.suptitle("Posterior Distributions of Group-Level SDT Parameters")
-        
-        # Save plots to output directory (already defined above)
-        plt.savefig(OUTPUT_DIR / 'sdt_posterior_plots.png')
-        plt.close() # Close the plot to prevent it from displaying in the console
-        print(f"SDT posterior plots saved to {OUTPUT_DIR / 'sdt_posterior_plots.png'}")
+            trace = pm.sample(draws=2000, tune=2000, chains=4, cores=4, random_seed=42, return_inferencedata=True)
+        print("Sampling complete.")
+
+        # Check Convergence
+        print("\n" + "-"*30 + "\n--- Model Convergence Summary ---\n" + "-"*30)
+        # Display summary of the posterior for the main effects parameters
+        convergence_summary = az.summary(trace, var_names=[
+            'mean_d_prime_intercept', 'effect_stimulus_type_dprime', 'effect_difficulty_dprime',
+            'stdev_d_prime_overall', # Note: renamed to stdev_d_prime_overall in model
+            'mean_criterion_intercept', 'effect_stimulus_type_criterion',
+            'effect_difficulty_criterion', 'stdev_criterion_overall' # Note: renamed to stdev_criterion_overall in model
+        ])
+        print(convergence_summary)
+
+        # Save the convergence summary to a CSV file
+        convergence_summary.to_csv(OUTPUT_DIR / 'sdt_model_convergence_summary.csv')
+        print(f"\nConvergence summary saved to: {OUTPUT_DIR / 'sdt_model_convergence_summary.csv'}")
+
+        # Posterior Distributions
+        print("\n" + "-"*30 + "\n--- Displaying Posterior Distributions ---\n" + "-"*30)
+        az.plot_trace(trace, var_names=[
+            'mean_d_prime_intercept', 'effect_stimulus_type_dprime', 'effect_difficulty_dprime',
+            'mean_criterion_intercept', 'effect_stimulus_type_criterion', 'effect_difficulty_criterion'
+        ])
+        plt.suptitle("Posterior Trace Plots of SDT Model Parameters", y=1.02)
+        plt.tight_layout()
+        plt.savefig(OUTPUT_DIR / 'sdt_trace_plots.png')
+        print(f"SDT trace plots saved to: {OUTPUT_DIR / 'sdt_trace_plots.png'}")
+        plt.close() # Close to prevent displaying if running non-interactively
+
+        # Use plot_posterior for just the density and HDI
+        az.plot_posterior(trace, var_names=[
+            'mean_d_prime_intercept', 'effect_stimulus_type_dprime', 'effect_difficulty_dprime',
+            'mean_criterion_intercept', 'effect_stimulus_type_criterion', 'effect_difficulty_criterion'
+        ])
+        plt.suptitle("Posterior Density Plots of SDT Model Parameters", y=1.02)
+        plt.tight_layout()
+        plt.savefig(OUTPUT_DIR / 'sdt_posterior_density_plots.png')
+        print(f"Posterior density plots saved to: {OUTPUT_DIR / 'sdt_posterior_density_plots.png'}")
+        plt.close() 
 
     else:
-        print("SDT data is empty. Skipping model application.")
+        print("SDT data is empty. Skipping model application and analysis.")
 
-    # Execute Delta Plot Analysis
-    print("\n--- Running Delta Plot Analysis ---")
+    # Delta Plots
+    print("\n" + "="*30 + "\n--- Running Delta Plot Analysis ---\n" + "="*30)
     dp_data = read_data(data_file_path, prepare_for='delta plots', display=True)
 
     if not dp_data.empty:
         # Draw delta plots for each participant
-        for pnum in dp_data['pnum'].unique():
-            print(f"\nDrawing delta plots for Participant {pnum}...")
-            draw_delta_plots(dp_data, pnum)
-            plt.close() # Close the plot after saving
-            print(f"Delta plots for Participant {pnum} saved to {OUTPUT_DIR / f'delta_plots_{pnum}.png'}")
+        if not dp_data['pnum'].empty: # Check if there are participants in delta plot data
+            for pnum in dp_data['pnum'].unique():
+                print(f"\nDrawing delta plots for Participant {pnum}...")
+                draw_delta_plots(dp_data, pnum)
+                plt.close() # Close the plot after saving
+                print(f"Delta plots for Participant {pnum} saved to {OUTPUT_DIR / f'delta_plots_{pnum}.png'}")
+        else:
+            print("No participants found in delta plot data to draw plots for.")
     else:
         print("Delta plot data is empty. Skipping delta plot generation.")
 
+    print("\n" + "="*30 + "\n--- All Analyses Complete ---\n" + "="*30)
+    print(f"Check the '{OUTPUT_DIR.name}' folder for generated files!")
 
-# Main execution
-if __name__ == "__main__":
-    data_path = Path(__file__).parent.parent / 'data' / 'data.csv' 
-    sdt_data = read_data(data_path, prepare_for='sdt', display=True)
-
-    sdt_model = apply_hierarchical_sdt_model(sdt_data)
-
-    print("\nSampling from the SDT model posterior...")
-    with sdt_model:
-        trace = pm.sample(draws=2000, tune=2000, chains=4, cores=4, random_seed=42)
-    print("Sampling complete.")
-
-    # Convergence
-    print("\n--- Model Convergence Summary ---")
-    convergence_summary = az.summary(trace, var_names=[
-        'mean_d_prime_intercept', 'effect_stimulus_type_dprime', 'effect_difficulty_dprime',
-        'stdev_d_prime', 'mean_criterion_intercept', 'effect_stimulus_type_criterion',
-        'effect_difficulty_criterion', 'stdev_criterion'
-    ])
-    print(convergence_summary)
-
-    # Save the convergence summary to a CSV file for later review
-    OUTPUT_DIR = Path(__file__).parent.parent.parent / 'output'
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    convergence_summary.to_csv(OUTPUT_DIR / 'sdt_model_convergence_summary.csv')
-    print(f"\nConvergence summary saved to: {OUTPUT_DIR / 'sdt_model_convergence_summary.csv'}")
-
-    # Posterior Distributions 
-    print("\n--- Displaying Posterior Distributions ---")
-    az.plot_posterior(trace, var_names=[
-        'mean_d_prime_intercept', 'effect_stimulus_type_dprime', 'effect_difficulty_dprime',
-        'mean_criterion_intercept', 'effect_stimulus_type_criterion', 'effect_difficulty_criterion'
-    ])
-    plt.suptitle("Posterior Distributions of SDT Model Parameters", y=1.02)
-    plt.tight_layout()
-    plt.savefig(OUTPUT_DIR / 'sdt_posterior_distributions.png')
-    print(f"Posterior distributions plot saved to: {OUTPUT_DIR / 'sdt_posterior_distributions.png'}")
-    plt.show() # Display the plot if running interactively
-
-    # Delta Plots
-    delta_plot_data = read_data(data_path, prepare_for='delta plots', display=True)
-    print("\n--- Drawing Delta Plots ---")
-    participant_to_plot = sdt_data['pnum'].unique()[0] # Plot for the first participant
-    draw_delta_plots(delta_plot_data, participant_to_plot)
-    print(f"Delta plots for participant {participant_to_plot} saved to: {OUTPUT_DIR / f'delta_plots_{participant_to_plot}.png'}")
-
-    print("\nAnalysis complete. Check 'output' folder!")
