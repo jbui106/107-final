@@ -270,8 +270,8 @@ def draw_delta_plots(data, pnum):
     """Draw delta plots comparing RT distributions between condition pairs.
     
     Creates a matrix of delta plots where:
-    - Upper triangle shows overall RT distribution differences
-    - Lower triangle shows RT differences split by correct/error responses
+    - Upper triangle shows overall RT distribution differences (black line)
+    - Lower triangle shows RT differences split by correct/error responses (red/green lines)
     
     Args:
         data: DataFrame with RT percentile data
@@ -310,9 +310,16 @@ def draw_delta_plots(data, pnum):
             if i == len(axes)-1:
                 axes[i,j].set_xlabel('Percentile', fontsize=12)
                 
-            # Skip diagonal and lower triangle for overall plots
-            if i > j:
-                # Upper triangle for overall RT differences
+            # Diagonal: Turn off axes and add condition name
+            if i == j:
+                axes[i,j].axis('off')
+                axes[i,j].text(0.5, 0.5, CONDITION_NAMES[conditions[i]], 
+                               ha='center', va='center', fontsize=14, fontweight='bold')
+                continue # Skip to next iteration
+
+            # Upper Triangle (i < j): Overall RT distribution differences (black line)
+            # This is where OVERALL RT differences typically go.
+            if i < j:
                 cmask1 = data['condition'] == cond1
                 cmask2 = data['condition'] == cond2
                 overall_mask = data['mode'] == 'overall'
@@ -328,12 +335,12 @@ def draw_delta_plots(data, pnum):
 
                 axes[i,j].set_ylim(bottom=-1/3, top=1/2) # Set common y-axis limits
                 axes[i,j].axhline(y=0, color='gray', linestyle='--', alpha=0.5) 
-                axes[i,j].text(50, -0.27, 
-                              f'{CONDITION_NAMES[conditions[j]]} - {CONDITION_NAMES[conditions[i]]}', 
-                              ha='center', va='top', fontsize=12)
+                axes[i,j].set_title(f'{CONDITION_NAMES[conditions[j]]} - {CONDITION_NAMES[conditions[i]]}', 
+                                    fontsize=12, pad=10)
 
-            elif i < j:
-                # Lower triangle for error and accurate RT differences
+            # Lower Triangle (i > j): RT differences split by correct/error responses (red/green lines)
+            # This is where accuracy-dependent plots typically go.
+            elif i > j:
                 cmask1 = data['condition'] == cond1
                 cmask2 = data['condition'] == cond2
                 error_mask = data['mode'] == 'error'
@@ -359,15 +366,11 @@ def draw_delta_plots(data, pnum):
                 else:
                     axes[i,j].text(50, 0, "No data", ha='center', va='center', fontsize=10, color='gray')
 
-
                 axes[i,j].set_ylim(bottom=-1/3, top=1/2) # Set common y-axis limits
                 axes[i,j].axhline(y=0, color='gray', linestyle='--', alpha=0.5)
-                axes[i,j].text(50, -0.27, 
-                              f'{CONDITION_NAMES[conditions[j]]} - {CONDITION_NAMES[conditions[i]]}', 
-                              ha='center', va='top', fontsize=12)
-            else: # Diagonal
-                axes[i,j].axis('off') # Turn off axes for diagonal plots
-
+                axes[i,j].set_title(f'{CONDITION_NAMES[conditions[j]]} - {CONDITION_NAMES[conditions[i]]}', 
+                                    fontsize=12, pad=10)
+            
     plt.tight_layout()
             
     # Save the figure
