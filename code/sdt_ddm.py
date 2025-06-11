@@ -229,8 +229,8 @@ def apply_hierarchical_sdt_model(data):
 
         # Define the mean d_prime and criterion for *each condition (C)*
         # This will be a (C,) shaped tensor, incorporating the interaction
-        mean_d_prime_per_condition = pm.Deterministic(
-            'mean_d_prime_per_condition', 
+        mean_d_prime = pm.Deterministic(
+            'mean_d_prime', 
             mean_d_prime_intercept +
             effect_stimulus_type_dprime * stimulus_type_conditions +
             effect_difficulty_dprime * difficulty_conditions +
@@ -238,8 +238,8 @@ def apply_hierarchical_sdt_model(data):
             dims=('condition_idx',)
         )
         
-        mean_criterion_per_condition = pm.Deterministic(
-            'mean_criterion_per_condition', 
+        mean_criterion = pm.Deterministic(
+            'mean_criterion', 
             mean_criterion_intercept +
             effect_stimulus_type_criterion * stimulus_type_conditions +
             effect_difficulty_criterion * difficulty_conditions +
@@ -249,12 +249,12 @@ def apply_hierarchical_sdt_model(data):
         
         # Individual-level parameters (P, C)
         d_prime = pm.Normal('d_prime',
-                            mu=mean_d_prime_per_condition,
+                            mu=mean_d_prime,
                             sigma=stdev_d_prime_overall,
                             dims=('pnum_idx', 'condition_idx'))
 
         criterion = pm.Normal('criterion',
-                             mu=mean_criterion_per_condition,
+                             mu=mean_criterion,
                              sigma=stdev_criterion_overall,
                              dims=('pnum_idx', 'condition_idx'))
         
@@ -404,7 +404,7 @@ def analyze_results(trace, data, OUTPUT_DIR):
         'effect_interaction_dprime', # NEW: Interaction for d'
         'stdev_d_prime_overall',
         'mean_criterion_intercept', 'effect_stimulus_type_criterion',
-        'effect_difficulty_criterion', 'effect_interaction_criterion', # NEW: Interaction for criterion
+        'effect_difficulty_criterion', 'effect_interaction_criterion', 
         'stdev_criterion_overall'
     ])
     print(convergence_summary)
@@ -431,9 +431,9 @@ def analyze_results(trace, data, OUTPUT_DIR):
     print("\n" + "-"*30 + "\n--- Displaying Posterior Density Plots ---\n" + "-"*30)
     az.plot_posterior(trace, var_names=[
         'mean_d_prime_intercept', 'effect_stimulus_type_dprime', 'effect_difficulty_dprime',
-        'effect_interaction_dprime', # NEW
+        'effect_interaction_dprime', 
         'mean_criterion_intercept', 'effect_stimulus_type_criterion',
-        'effect_difficulty_criterion', 'effect_interaction_criterion' # NEW
+        'effect_difficulty_criterion', 'effect_interaction_criterion' 
     ])
     plt.suptitle("Posterior Density Plots of SDT Model Parameters", y=1.02)
     plt.tight_layout()
@@ -444,13 +444,13 @@ def analyze_results(trace, data, OUTPUT_DIR):
     # --- Analyze Condition-Specific SDT Parameters ---
     print("\n" + "-"*30 + "\n--- Condition-Specific SDT Parameters ---\n" + "-"*30)
     # This will show the estimated d' and criterion for each of your 4 conditions
-    condition_sdt_summary = az.summary(trace, var_names=['mean_d_prime_per_condition', 'mean_criterion_per_condition'])
+    condition_sdt_summary = az.summary(trace, var_names=['mean_d_prime', 'mean_criterion'])
     print(condition_sdt_summary)
     condition_sdt_summary.to_csv(OUTPUT_DIR / 'sdt_condition_parameters_summary.csv')
     print(f"\nCondition-specific SDT parameters saved to: {OUTPUT_DIR / 'sdt_condition_parameters_summary.csv'}")
 
     # Plot condition-specific d' and criterion
-    az.plot_posterior(trace, var_names=['mean_d_prime_per_condition', 'mean_criterion_per_condition'],
+    az.plot_posterior(trace, var_names=['mean_d_prime', 'mean_criterion'],
                       hdi_prob=0.94, figsize=(10, 6))
     plt.suptitle("Posterior Distributions of Mean d' and Criterion per Condition", y=1.02)
     plt.tight_layout()
@@ -462,42 +462,51 @@ def analyze_results(trace, data, OUTPUT_DIR):
     print("\n" + "-"*30 + "\n--- Derived SDT Parameter Comparisons ---\n" + "-"*30)
     
 
-    # Effect of Stimulus Type (Complex - Simple) at each Difficulty Level:
-    with trace.posterior:
-        # Effect of Stimulus Type for EASY trials: (Easy Complex) - (Easy Simple)
-        pm.Deterministic('d_prime_effect_stim_type_easy', 
-                         trace.posterior['mean_d_prime_per_condition'][:, :, 1] - 
-                         trace.posterior['mean_d_prime_per_condition'][:, :, 0])
-        pm.Deterministic('criterion_effect_stim_type_easy', 
-                         trace.posterior['mean_criterion_per_condition'][:, :, 1] - 
-                         trace.posterior['mean_criterion_per_condition'][:, :, 0])
+    # Access the relevant posterior samples for calculations
+    mean_d_prime_posterior_samples = trace.posterior['mean_d_prime']
+    mean_criterion_posterior_samples = trace.posterior['mean_criterion']
 
-        # Effect of Stimulus Type for HARD trials: (Hard Complex) - (Hard Simple)
-        pm.Deterministic('d_prime_effect_stim_type_hard', 
-                         trace.posterior['mean_d_prime_per_condition'][:, :, 3] - 
-                         trace.posterior['mean_d_prime_per_condition'][:, :, 2])
-        pm.Deterministic('criterion_effect_stim_type_hard', 
-                         trace.posterior['mean_criterion_per_condition'][:, :, 3] - 
-                         trace.posterior['mean_criterion_per_condition'][:, :, 2])
+    # Calculate derived parameters and add them directly to the posterior group of the InferenceData
+    trace.posterior['d_prime_effect_stim_type_easy'] = (
+        mean_d_prime_posterior_samples.sel(condition_idx='Easy Complex') - 
+        mean_d_prime_posterior_samples.sel(condition_idx='Easy Simple')
+    )
+    trace.posterior['criterion_effect_stim_type_easy'] = (
+        mean_criterion_posterior_samples.sel(condition_idx='Easy Complex') - 
+        mean_criterion_posterior_samples.sel(condition_idx='Easy Simple')
+    )
 
-        # Effect of Trial Difficulty (Hard - Easy) for each Stimulus Type:
-        # Effect of Difficulty for SIMPLE stimuli: (Hard Simple) - (Easy Simple)
-        pm.Deterministic('d_prime_effect_difficulty_simple', 
-                         trace.posterior['mean_d_prime_per_condition'][:, :, 2] - 
-                         trace.posterior['mean_d_prime_per_condition'][:, :, 0])
-        pm.Deterministic('criterion_effect_difficulty_simple', 
-                         trace.posterior['mean_criterion_per_condition'][:, :, 2] - 
-                         trace.posterior['mean_criterion_per_condition'][:, :, 0])
-        
-        # Effect of Difficulty for COMPLEX stimuli: (Hard Complex) - (Easy Complex)
-        pm.Deterministic('d_prime_effect_difficulty_complex', 
-                         trace.posterior['mean_d_prime_per_condition'][:, :, 3] - 
-                         trace.posterior['mean_d_prime_per_condition'][:, :, 1])
-        pm.Deterministic('criterion_effect_difficulty_complex', 
-                         trace.posterior['mean_criterion_per_condition'][:, :, 3] - 
-                         trace.posterior['mean_criterion_per_condition'][:, :, 1])
+    # Effect of Stimulus Type for HARD trials: (Hard Complex) - (Hard Simple)
+    trace.posterior['d_prime_effect_stim_type_hard'] = (
+        mean_d_prime_posterior_samples.sel(condition_idx='Hard Complex') - 
+        mean_d_prime_posterior_samples.sel(condition_idx='Hard Simple')
+    )
+    trace.posterior['criterion_effect_stim_type_hard'] = (
+        mean_criterion_posterior_samples.sel(condition_idx='Hard Complex') - 
+        mean_criterion_posterior_samples.sel(condition_idx='Hard Simple')
+    )
 
-    # Display summaries of these derived parameters
+    # Effect of Trial Difficulty (Hard - Easy) for each Stimulus Type:
+    trace.posterior['d_prime_effect_difficulty_simple'] = (
+        mean_d_prime_posterior_samples.sel(condition_idx='Hard Simple') - 
+        mean_d_prime_posterior_samples.sel(condition_idx='Easy Simple')
+    )
+    trace.posterior['criterion_effect_difficulty_simple'] = (
+        mean_criterion_posterior_samples.sel(condition_idx='Hard Simple') - 
+        mean_criterion_posterior_samples.sel(condition_idx='Easy Simple')
+    )
+    
+    # Effect of Difficulty for COMPLEX stimuli: (Hard Complex) - (Easy Complex)
+    trace.posterior['d_prime_effect_difficulty_complex'] = (
+        mean_d_prime_posterior_samples.sel(condition_idx='Hard Complex') - 
+        mean_d_prime_posterior_samples.sel(condition_idx='Easy Complex')
+    )
+    trace.posterior['criterion_effect_difficulty_complex'] = (
+        mean_criterion_posterior_samples.sel(condition_idx='Hard Complex') - 
+        mean_criterion_posterior_samples.sel(condition_idx='Easy Complex')
+    )
+
+    # Define the list of derived variable names for summary and plotting
     derived_vars_dprime = [
         'd_prime_effect_stim_type_easy', 'd_prime_effect_stim_type_hard',
         'd_prime_effect_difficulty_simple', 'd_prime_effect_difficulty_complex'
@@ -507,6 +516,7 @@ def analyze_results(trace, data, OUTPUT_DIR):
         'criterion_effect_difficulty_simple', 'criterion_effect_difficulty_complex'
     ]
 
+    # Display summaries of these derived parameters
     print("\nSummary of Derived d' Effects (Conditional):")
     derived_dprime_summary = az.summary(trace, var_names=derived_vars_dprime, hdi_prob=0.94)
     print(derived_dprime_summary)
