@@ -1,0 +1,5 @@
+,mean,sd,hdi_3%,hdi_97%,mcse_mean,mcse_sd,ess_bulk,ess_tail,r_hat
+d_prime_effect_stim_type_easy,0.394,0.338,-0.219,1.039,0.003,0.004,14872.0,6965.0,1.0
+d_prime_effect_stim_type_hard,-0.25,0.425,-1.089,0.53,0.003,0.006,17489.0,5847.0,1.0
+d_prime_effect_difficulty_simple,-1.63,0.419,-2.419,-0.831,0.004,0.004,9075.0,6252.0,1.0
+d_prime_effect_difficulty_complex,-2.274,0.506,-3.207,-1.309,0.005,0.005,10120.0,6245.0,1.0

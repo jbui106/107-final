@@ -1,0 +1,5 @@
+,mean,sd,hdi_3%,hdi_97%,mcse_mean,mcse_sd,ess_bulk,ess_tail,r_hat
+criterion_effect_stim_type_easy,0.177,0.21,-0.211,0.574,0.002,0.002,9010.0,6880.0,1.0
+criterion_effect_stim_type_hard,-0.119,0.226,-0.548,0.292,0.002,0.003,12680.0,6264.0,1.0
+criterion_effect_difficulty_simple,-1.383,0.215,-1.782,-0.975,0.002,0.002,9111.0,6539.0,1.0
+criterion_effect_difficulty_complex,-1.679,0.232,-2.11,-1.251,0.002,0.003,12982.0,6917.0,1.0
