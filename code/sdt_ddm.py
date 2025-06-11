@@ -386,12 +386,8 @@ def draw_delta_plots(data, pnum):
 
 
 def analyze_results(trace, data, OUTPUT_DIR):
-    """Analyze and visualize the posterior samples from the SDT model.
-    
-    Args:
-        trace: Arviz InferenceData object containing posterior samples
-        data: DataFrame containing SDT summary statistics (used for CONDITION_NAMES)
-        OUTPUT_DIR: Path object for saving outputs
+    """
+    Analyze and visualize the posterior samples from the SDT model.
     """
     # --- Check Convergence & Main Effect Summary ---
     print("\n" + "-"*30 + "\n--- SDT Model Convergence & Main Effect Summary ---\n" + "-"*30)
@@ -406,11 +402,11 @@ def analyze_results(trace, data, OUTPUT_DIR):
     print(convergence_summary)
 
     # Save the convergence summary to a CSV file
-    convergence_summary.to_csv(OUTPUT_DIR / 'model_convergence_summary.csv')
-    print(f"\nConvergence summary saved to: {OUTPUT_DIR / 'model_convergence_summary.csv'}")
+    convergence_summary.to_csv(OUTPUT_DIR / 'convergence_summary.csv')
+    print(f"\nConvergence summary saved to: {OUTPUT_DIR / 'convergence_summary.csv'}")
 
     # --- Display Posterior Distributions (Trace Plots) ---
-    print("\n" + "\n--- Displaying Posterior Trace Plots ---\n")
+    print("\n" + "\n--- Posterior Trace Plots ---\n")
     az.plot_trace(trace, var_names=[
         'mean_d_prime_intercept', 'effect_stimulus_type_dprime', 'effect_difficulty_dprime',
         'effect_interaction_dprime', 
@@ -424,7 +420,7 @@ def analyze_results(trace, data, OUTPUT_DIR):
     plt.close()
 
     # --- Display Posterior Distributions (Density Plots) ---
-    print("\n" + "\n--- Displaying Posterior Density Plots ---\n")
+    print("\n" + "\n--- Posterior Density Plots ---\n")
     az.plot_posterior(trace, var_names=[
         'mean_d_prime_intercept', 'effect_stimulus_type_dprime', 'effect_difficulty_dprime',
         'effect_interaction_dprime', 
@@ -460,15 +456,10 @@ def analyze_results(trace, data, OUTPUT_DIR):
     individual_sdt_summary.to_csv(OUTPUT_DIR / 'individual_parameters_summary.csv')
     print(f"\nPerson-specific SDT parameters saved to: {OUTPUT_DIR / 'individual_parameters_summary.csv'}")
 
-    # You could also plot individual-level posteriors, but it might be too many plots
-    # az.plot_posterior(trace, var_names=['d_prime'], coords={'condition_idx': ['Easy Simple']}, filter_coords=True)
-    # plt.savefig(OUTPUT_DIR / 'sdt_individual_dprime_easy_simple.png')
-    # plt.close()
     
     # --- Derived Comparisons (e.g., Simple vs Complex within Easy/Hard) ---
     print("\n" + "-"*30 + "\n--- Derived SDT Parameter Comparisons ---\n" + "-"*30)
     
-
     # Access the relevant posterior samples for calculations
     mean_d_prime_posterior_samples = trace.posterior['mean_d_prime']
     mean_criterion_posterior_samples = trace.posterior['mean_criterion']
@@ -533,19 +524,6 @@ def analyze_results(trace, data, OUTPUT_DIR):
     derived_criterion_summary = az.summary(trace, var_names=derived_vars_criterion, hdi_prob=0.94)
     print(derived_criterion_summary)
     derived_criterion_summary.to_csv(OUTPUT_DIR / 'derived_criterion_effects.csv')
-
-    # Plot these derived parameters
-    # az.plot_posterior(trace, var_names=derived_vars_dprime, hdi_prob=0.94, ref_val=0)
-    # plt.suptitle("Posterior Distributions of Derived d' Effects", y=1.02)
-    # plt.tight_layout()
-    # plt.savefig(OUTPUT_DIR / 'sdt_derived_dprime_posterior_plots.png')
-    # plt.close()
-
-    # az.plot_posterior(trace, var_names=derived_vars_criterion, hdi_prob=0.94, ref_val=0)
-    # plt.suptitle("Posterior Distributions of Derived Criterion Effects", y=1.02)
-    # plt.tight_layout()
-    # plt.savefig(OUTPUT_DIR / 'sdt_derived_criterion_posterior_plots.png')
-    # plt.close()
 
 
 # Main execution block
