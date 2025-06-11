@@ -170,8 +170,6 @@ def read_data(file_path, prepare_for='sdt', display=False):
     return data
 
 
-# ... (rest of the code before apply_hierarchical_sdt_model is unchanged) ...
-
 def apply_hierarchical_sdt_model(data):
     """Apply a hierarchical Signal Detection Theory model using PyMC.
     
@@ -228,13 +226,12 @@ def apply_hierarchical_sdt_model(data):
         stdev_criterion_overall = pm.HalfNormal('stdev_criterion_overall', sigma=1.0)
 
         # Define the mean d_prime and criterion for *each condition (C)*
-        # This will be a (C,) shaped tensor, incorporating the interaction
         mean_d_prime = pm.Deterministic(
             'mean_d_prime', 
             mean_d_prime_intercept +
             effect_stimulus_type_dprime * stimulus_type_conditions +
             effect_difficulty_dprime * difficulty_conditions +
-            effect_interaction_dprime * interaction_conditions, # Add interaction
+            effect_interaction_dprime * interaction_conditions, 
             dims=('condition_idx',)
         )
         
@@ -243,7 +240,7 @@ def apply_hierarchical_sdt_model(data):
             mean_criterion_intercept +
             effect_stimulus_type_criterion * stimulus_type_conditions +
             effect_difficulty_criterion * difficulty_conditions +
-            effect_interaction_criterion * interaction_conditions, # Add interaction
+            effect_interaction_criterion * interaction_conditions, 
             dims=('condition_idx',)
         )
         
@@ -398,10 +395,9 @@ def analyze_results(trace, data, OUTPUT_DIR):
     """
     # --- Check Convergence & Main Effect Summary ---
     print("\n" + "-"*30 + "\n--- SDT Model Convergence & Main Effect Summary ---\n" + "-"*30)
-    # Include the new interaction terms in the summary
     convergence_summary = az.summary(trace, var_names=[
         'mean_d_prime_intercept', 'effect_stimulus_type_dprime', 'effect_difficulty_dprime',
-        'effect_interaction_dprime', # NEW: Interaction for d'
+        'effect_interaction_dprime',
         'stdev_d_prime_overall',
         'mean_criterion_intercept', 'effect_stimulus_type_criterion',
         'effect_difficulty_criterion', 'effect_interaction_criterion', 
@@ -414,12 +410,12 @@ def analyze_results(trace, data, OUTPUT_DIR):
     print(f"\nConvergence summary saved to: {OUTPUT_DIR / 'sdt_model_convergence_summary.csv'}")
 
     # --- Display Posterior Distributions (Trace Plots) ---
-    print("\n" + "-"*30 + "\n--- Displaying Posterior Trace Plots ---\n" + "-"*30)
+    print("\n" + "\n--- Displaying Posterior Trace Plots ---\n")
     az.plot_trace(trace, var_names=[
         'mean_d_prime_intercept', 'effect_stimulus_type_dprime', 'effect_difficulty_dprime',
-        'effect_interaction_dprime', # NEW
+        'effect_interaction_dprime', 
         'mean_criterion_intercept', 'effect_stimulus_type_criterion',
-        'effect_difficulty_criterion', 'effect_interaction_criterion' # NEW
+        'effect_difficulty_criterion', 'effect_interaction_criterion' 
     ])
     plt.suptitle("Posterior Trace Plots of SDT Model Parameters", y=1.02)
     plt.tight_layout()
@@ -428,7 +424,7 @@ def analyze_results(trace, data, OUTPUT_DIR):
     plt.close()
 
     # --- Display Posterior Distributions (Density Plots) ---
-    print("\n" + "-"*30 + "\n--- Displaying Posterior Density Plots ---\n" + "-"*30)
+    print("\n" + "\n--- Displaying Posterior Density Plots ---\n")
     az.plot_posterior(trace, var_names=[
         'mean_d_prime_intercept', 'effect_stimulus_type_dprime', 'effect_difficulty_dprime',
         'effect_interaction_dprime', 
@@ -457,6 +453,17 @@ def analyze_results(trace, data, OUTPUT_DIR):
     plt.savefig(OUTPUT_DIR / 'sdt_condition_posterior_plots.png')
     print(f"Condition-specific posterior plots saved to: {OUTPUT_DIR / 'sdt_condition_posterior_plots.png'}")
     plt.close()
+
+    print("\n" + "-"*30 + "\n--- Person-Specific SDT Parameter Estimates ---\n" + "-"*30)
+    individual_sdt_summary = az.summary(trace, var_names=['d_prime', 'criterion'])
+    print(individual_sdt_summary)
+    individual_sdt_summary.to_csv(OUTPUT_DIR / 'sdt_individual_parameters_summary.csv')
+    print(f"\nPerson-specific SDT parameters saved to: {OUTPUT_DIR / 'sdt_individual_parameters_summary.csv'}")
+
+    # You could also plot individual-level posteriors, but it might be too many plots
+    # az.plot_posterior(trace, var_names=['d_prime'], coords={'condition_idx': ['Easy Simple']}, filter_coords=True)
+    # plt.savefig(OUTPUT_DIR / 'sdt_individual_dprime_easy_simple.png')
+    # plt.close()
     
     # --- Derived Comparisons (e.g., Simple vs Complex within Easy/Hard) ---
     print("\n" + "-"*30 + "\n--- Derived SDT Parameter Comparisons ---\n" + "-"*30)
@@ -528,17 +535,17 @@ def analyze_results(trace, data, OUTPUT_DIR):
     derived_criterion_summary.to_csv(OUTPUT_DIR / 'sdt_derived_criterion_effects.csv')
 
     # Plot these derived parameters
-    az.plot_posterior(trace, var_names=derived_vars_dprime, hdi_prob=0.94, ref_val=0)
-    plt.suptitle("Posterior Distributions of Derived d' Effects", y=1.02)
-    plt.tight_layout()
-    plt.savefig(OUTPUT_DIR / 'sdt_derived_dprime_posterior_plots.png')
-    plt.close()
+    # az.plot_posterior(trace, var_names=derived_vars_dprime, hdi_prob=0.94, ref_val=0)
+    # plt.suptitle("Posterior Distributions of Derived d' Effects", y=1.02)
+    # plt.tight_layout()
+    # plt.savefig(OUTPUT_DIR / 'sdt_derived_dprime_posterior_plots.png')
+    # plt.close()
 
-    az.plot_posterior(trace, var_names=derived_vars_criterion, hdi_prob=0.94, ref_val=0)
-    plt.suptitle("Posterior Distributions of Derived Criterion Effects", y=1.02)
-    plt.tight_layout()
-    plt.savefig(OUTPUT_DIR / 'sdt_derived_criterion_posterior_plots.png')
-    plt.close()
+    # az.plot_posterior(trace, var_names=derived_vars_criterion, hdi_prob=0.94, ref_val=0)
+    # plt.suptitle("Posterior Distributions of Derived Criterion Effects", y=1.02)
+    # plt.tight_layout()
+    # plt.savefig(OUTPUT_DIR / 'sdt_derived_criterion_posterior_plots.png')
+    # plt.close()
 
 
 # Main execution block
